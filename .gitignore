@@ -1,0 +1,4 @@
+.mcp.json
+.playwright-mcp/
+server.log
+.claude/

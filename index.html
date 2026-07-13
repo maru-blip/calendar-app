@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>カレンダー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@300;400;500&family=Space+Mono:wght@400;700&display=swap">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  /* ==============================
+     デザイン変数
+     色や余白をここでまとめて管理。
+     配色を変えたいときはここだけ触ればOK。
+     ============================== */
+  :root{
+    --font: 'Kiwi Maru', sans-serif;
+    --font-num: 'Space Mono', monospace;
+
+    --bg-page: #FFFFFF;
+    --surface: #FFFFFF;
+    --surface-2: #F7F5F0;
+    --border: #E5E1D8;
+    --border-strong: #D3CDBE;
+
+    --text-primary: #2B2A26;
+    --text-secondary: #726E63;
+    --text-muted: #A6A196;
+
+    /* くっきりボタニカル配色: 勉強=青(accent) / 仕事=緑(success) / 締切=赤(danger) / 注意=黄(warning) */
+    --bg-accent: #EAF0FF;    --text-accent: #4A6CF7;    --border-accent: #B7C6FB;
+    --bg-success: #E5F8F0;   --text-success: #1E9C71;   --border-success: #A6E6CB;
+    --bg-danger: #FDEAEA;    --text-danger: #E63A31;    --border-danger: #F7B7B3;
+    --bg-warning: #FFF4E0;   --text-warning: #E0932B;   --border-warning: #F7D9A0;
+
+    --brand: #4A6CF7;
+    --brand-contrast: #FFFFFF;
+
+    --radius: 14px;
+    --shadow-popover: 0 6px 20px rgba(43,42,38,0.14);
+  }
+
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    font-family: var(--font);
+    background: var(--bg-page);
+    color: var(--text-primary);
+    -webkit-tap-highlight-color: transparent;
+  }
+  button, input, select{ font-family: var(--font); }
+  button{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 20px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:active{ opacity: .7; }
+  input[type=text], input[type=date], input[type=time], select{
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 14px;
+    background: var(--surface);
+    color: var(--text-primary);
+  }
+
+  .app{ max-width: 720px; margin: 0 auto; padding: 16px 16px 40px; }
+
+  /* タブ */
+  .tabbar{ display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--border); margin-bottom:16px; }
+  .tabs{ display:flex; flex:1; }
+  .tab{ flex:1; text-align:center; padding:10px 0; font-size:13px; cursor:pointer; border-bottom:2px solid transparent; color:var(--text-secondary); }
+  .tab.active{ color:var(--brand); border-bottom-color:var(--brand); font-weight:500; }
+  .view{ display:none; }
+  .view.active{ display:block; }
+
+  /* 予定追加ポップアップ（ボトムシート） */
+  #add-overlay{
+    display:none; position:fixed; inset:0; background:rgba(43,42,38,0.35);
+    align-items:flex-end; justify-content:center; z-index:50;
+  }
+  #add-form{
+    background:var(--surface); border-radius:20px 20px 0 0; padding:20px;
+    width:100%; max-width:720px; max-height:85vh; overflow-y:auto;
+    box-shadow:0 -8px 30px rgba(0,0,0,0.15); box-sizing:border-box;
+  }
+  .modal-handle{ width:36px; height:4px; background:var(--border-strong); border-radius:2px; margin:0 auto 14px; }
+  .modal-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .modal-title{ font-size:15px; font-weight:500; margin:0; }
+  #add-close{ padding:4px 10px; }
+  .field{ margin-bottom:12px; }
+  .flabel{ font-size:12px; color:var(--text-secondary); display:block; margin-bottom:4px; }
+  .type-btn.selected{ background:var(--brand); color:var(--brand-contrast); border-color:var(--brand); }
+  #add-form .row{ display:flex; gap:8px; }
+  #add-form .row > *{ flex:1; }
+
+  /* 日表示ヘッダー */
+  .day-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .day-title{ font-size:15px; font-weight:500; margin:0; }
+  .nav-group{ display:flex; gap:6px; }
+  .nav-group button{ padding:4px 10px; }
+
+  /* 締切・終日帯 */
+  .allday-row{
+    display:flex; justify-content:space-between; align-items:center;
+    background: var(--bg-danger); color: var(--text-danger);
+    border-radius:10px; padding:6px 10px; font-size:12px; font-weight:500; margin-bottom:6px;
+  }
+
+  /* タイムライン */
+  #day-bgwrap{ position:relative; height:420px; width:100%; background:var(--surface); border-radius:var(--radius); overflow:hidden; }
+  #day-labels{ position:absolute; left:0; top:0; width:48px; height:100%; }
+  #day-gridlines{ position:absolute; left:52px; right:0; top:0; height:100%; }
+  #day-events{ position:absolute; left:52px; right:0; top:0; height:100%; }
+  .hrline{ position:absolute; left:0; right:0; border-top:1px solid var(--border); }
+  .htime{ position:absolute; left:0; width:44px; text-align:right; font-size:11px; color:var(--text-muted); font-family:var(--font-num); }
+  .nowline{ position:absolute; left:0; right:0; border-top:2px solid #E0463E; z-index:3; pointer-events:none; }
+  .nowdot{ position:absolute; left:-4px; top:-5px; width:8px; height:8px; border-radius:50%; background:#E0463E; }
+
+  .evbox{ position:absolute; border-radius:8px; padding:3px 6px; box-sizing:border-box; overflow:hidden; cursor:pointer; }
+  .evtitle{ margin:0; font-size:11px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .evtime{ margin:0; font-size:10px; white-space:nowrap; overflow:hidden; font-family:var(--font-num); }
+
+  .bubble{
+    position:absolute; z-index:5; background:var(--surface); border:1px solid var(--border-strong);
+    border-radius:14px; padding:10px; width:180px; box-shadow:var(--shadow-popover); display:none;
+  }
+  .bubble p{ margin:0; }
+
+  .hint{ font-size:11px; color:var(--text-muted); margin-top:8px; text-align:center; }
+
+  /* 週表示 */
+  #week-scroll{ overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:var(--radius); background:var(--surface); }
+  #week-grid{ display:grid; grid-template-columns:48px repeat(7,92px); width:max-content; }
+  .week-time-cell{ position:sticky; left:0; z-index:3; }
+  .week-col-header{ text-align:center; padding:8px 0 6px; font-size:11px; color:var(--text-secondary); cursor:pointer; border-left:1px solid var(--border); background:var(--surface); }
+  .wch-dow{ font-size:10px; }
+  .wch-date{ font-size:14px; font-weight:500; width:22px; height:22px; line-height:22px; border-radius:50%; margin:2px auto 0; }
+  .week-col-header.is-today .wch-date{ background:var(--brand); color:var(--brand-contrast); }
+  .week-allday-cell{ border-left:1px solid var(--border); padding:2px 3px; min-height:4px; background:var(--surface); }
+  .week-allday-chip{ background:var(--bg-danger); color:var(--text-danger); border-radius:6px; font-size:9px; padding:2px 4px; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .week-body-cell{ position:relative; height:420px; background:var(--surface); border-left:1px solid var(--border); }
+  .week-time-body-cell{ position:relative; height:420px; background:var(--bg-page); }
+  .evtitle-sm{ font-size:9px; }
+
+  /* 期限リスト・Todo */
+  #deadline-columns{ display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }
+  .deadline-col{ flex:1 1 260px; min-width:240px; }
+  .deadline-col-title, .deadline-section-title{ font-size:13px; font-weight:500; color:var(--text-secondary); margin:0 0 6px; }
+  .deadline-block{ margin-bottom:16px; }
+  .deadline-block:empty{ display:none; }
+  .deadline-list{ display:flex; flex-direction:column; gap:6px; }
+  .deadline-row{ display:flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:13px; }
+  .deadline-row.is-completed{ opacity:.55; text-decoration:line-through; }
+  .dr-title{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .dr-meta{ font-size:11px; opacity:.85; white-space:nowrap; }
+  .dr-move{ padding:2px 6px; font-size:11px; }
+  .dr-del{ padding:2px 8px; font-size:11px; color:var(--text-danger); }
+
+  .placeholder{ text-align:center; padding:60px 20px; color:var(--text-muted); font-size:14px; }
+
+  /* Google連携バナー */
+  #auth-banner{
+    display:none; background:var(--surface-2); border-radius:var(--radius);
+    padding:20px; text-align:center; margin-bottom:16px;
+  }
+  #auth-banner p{ font-size:13px; color:var(--text-secondary); margin:0 0 12px; }
+  #auth-connect{ background:var(--brand); color:var(--brand-contrast); border:none; padding:8px 18px; }
+
+  /* 背景写真（設定画面で調整、全画面共通の下地として表示） */
+  #bg-layer{
+    position:fixed; inset:0; z-index:-1; opacity:0;
+    background-size:cover; background-repeat:no-repeat; pointer-events:none;
+  }
+  body.has-bg{ background:transparent; }
+
+  /* 設定画面 */
+  .settings-section{ background:var(--surface); border-radius:var(--radius); padding:16px; margin-bottom:16px; }
+  .settings-section-title{ font-size:13px; font-weight:500; color:var(--text-secondary); margin:0 0 12px; }
+  .bg-preview{
+    width:100%; height:120px; border-radius:10px; margin-bottom:10px;
+    background:var(--surface-2) center/cover no-repeat; border:1px solid var(--border);
+  }
+  input[type=range]{ width:100%; }
+  input[type=number]{
+    border:1px solid var(--border); border-radius:10px; padding:8px 10px;
+    font-size:14px; background:var(--surface); color:var(--text-primary); width:100%;
+  }
+  .settings-row{ display:flex; gap:8px; margin-bottom:10px; }
+</style>
+</head>
+<body>
+<div id="bg-layer"></div>
+<div class="app">
+
+  <div class="tabbar">
+    <div class="tabs">
+      <div class="tab active" data-view="day">日</div>
+      <div class="tab" data-view="week">週</div>
+      <div class="tab" data-view="deadline">期限リスト</div>
+      <div class="tab" data-view="settings">設定</div>
+    </div>
+    <button id="add-toggle">＋ 追加</button>
+  </div>
+
+  <div id="auth-banner">
+    <p>Googleカレンダーと連携すると、予定の表示・追加・削除ができるようになります。</p>
+    <button id="auth-connect">Googleカレンダーと連携する</button>
+  </div>
+
+  <!-- 予定追加ポップアップ -->
+  <div id="add-overlay">
+  <div id="add-form">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <p class="modal-title">予定を追加</p>
+      <button id="add-close" aria-label="閉じる">✕</button>
+    </div>
+    <div class="field">
+      <span class="flabel">種類</span>
+      <div class="row">
+        <button class="type-btn selected" data-type="event">予定</button>
+        <button class="type-btn" data-type="todo">Todo</button>
+      </div>
+    </div>
+    <div class="field">
+      <span class="flabel">タイトル</span>
+      <input type="text" id="f-title" placeholder="例: 線形代数" style="width:100%">
+    </div>
+    <div class="field">
+      <span class="flabel">日付</span>
+      <input type="date" id="f-date" style="width:100%">
+    </div>
+    <div class="field" id="time-fields">
+      <span class="flabel">時刻（10分ごと）</span>
+      <div class="row">
+        <input type="time" id="f-start" step="600">
+        <input type="time" id="f-end" step="600">
+      </div>
+    </div>
+    <div class="field">
+      <span class="flabel">カテゴリ</span>
+      <select id="f-category" style="width:100%">
+        <option value="accent">勉強</option>
+        <option value="success">仕事</option>
+        <option value="danger">締切</option>
+      </select>
+    </div>
+    <button id="f-submit" style="width:100%; background:var(--brand); color:var(--brand-contrast);">追加する</button>
+  </div>
+  </div>
+
+  <!-- 日表示 -->
+  <div id="day" class="view active">
+    <div class="day-header">
+      <p class="day-title" id="day-title"></p>
+      <div class="nav-group">
+        <button id="day-prev" aria-label="前の日">←</button>
+        <button id="day-today">今日</button>
+        <button id="day-next" aria-label="次の日">→</button>
+      </div>
+    </div>
+    <div id="allday-area"></div>
+    <div id="day-bgwrap">
+      <div id="day-labels"></div>
+      <div id="day-gridlines"></div>
+      <div id="day-events"></div>
+    </div>
+    <p class="hint">空いている時間をタップすると、その時刻から予定を追加できます</p>
+  </div>
+
+  <!-- 週表示 -->
+  <div id="week" class="view">
+    <div class="day-header">
+      <p class="day-title" id="week-title"></p>
+      <div class="nav-group">
+        <button id="week-prev" aria-label="前の週">←</button>
+        <button id="week-today">今週</button>
+        <button id="week-next" aria-label="次の週">→</button>
+      </div>
+    </div>
+    <div id="week-scroll">
+      <div id="week-grid"></div>
+    </div>
+    <p class="hint">曜日をタップするとその日の日表示に移動します</p>
+  </div>
+
+  <!-- 期限リスト・Todo -->
+  <div id="deadline" class="view">
+    <div class="day-header">
+      <p class="day-title">期限リスト・Todo</p>
+      <button id="deadline-toggle-completed">完了を表示</button>
+    </div>
+    <div id="overdue-wrap" class="deadline-block"></div>
+    <div id="deadline-columns">
+      <div class="deadline-col">
+        <p class="deadline-col-title">勉強</p>
+        <div class="deadline-list" id="deadline-study"></div>
+      </div>
+      <div class="deadline-col">
+        <p class="deadline-col-title">仕事</p>
+        <div class="deadline-list" id="deadline-work"></div>
+      </div>
+    </div>
+    <div class="deadline-block">
+      <p class="deadline-section-title">Todo（期限なし）</p>
+      <div class="deadline-list" id="todo-list"></div>
+    </div>
+  </div>
+
+  <!-- 設定 -->
+  <div id="settings" class="view">
+    <div class="day-header">
+      <p class="day-title">設定</p>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">背景写真</p>
+      <div class="bg-preview" id="bg-preview"></div>
+      <div class="settings-row">
+        <button id="bg-upload-btn" style="flex:1;">写真を選ぶ</button>
+        <button id="bg-remove-btn" style="flex:1;">写真を削除</button>
+      </div>
+      <input type="file" id="bg-file" accept="image/*" style="display:none">
+      <div class="field">
+        <span class="flabel">横位置</span>
+        <input type="range" id="bg-pos-x" min="0" max="100" value="50">
+      </div>
+      <div class="field">
+        <span class="flabel">縦位置</span>
+        <input type="range" id="bg-pos-y" min="0" max="100" value="50">
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <span class="flabel">濃さ</span>
+        <input type="range" id="bg-opacity" min="0" max="100" value="30">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">通知タイミング</p>
+      <div class="field">
+        <span class="flabel">期限の何日前に通知するか</span>
+        <input type="number" id="notify-days" min="0">
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <span class="flabel">当日、何時間前に通知するか</span>
+        <input type="number" id="notify-hours" min="0" max="23">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">期限リストの色分け</p>
+      <div class="field">
+        <span class="flabel">赤色にする（◯日以内）</span>
+        <input type="number" id="threshold-red" min="0">
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <span class="flabel">黄色にする（◯日以内）</span>
+        <input type="number" id="threshold-yellow" min="0">
+      </div>
+    </div>
+
+    <button id="settings-save" style="width:100%; background:var(--brand); color:var(--brand-contrast);">保存する</button>
+  </div>
+
+</div>
+
+<script>
+/* ==============================
+   Googleカレンダー連携
+   ============================== */
+const GOOGLE_CLIENT_ID = '356778122638-4u3spagvtmjbjfnm3ck70uqise7tmapd.apps.googleusercontent.com';
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar';
+
+const SUPABASE_URL = 'https://ixkxavusivoeafmmunqn.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_3jfIqBv1qBVxb-JpJZ0Wyg_LatUzQek';
+const SUPABASE_HEADERS = {
+  apikey: SUPABASE_KEY,
+  Authorization: 'Bearer ' + SUPABASE_KEY,
+  'Content-Type': 'application/json'
+};
+
+let currentDate = new Date();
+let dayEvents = []; // 今表示している日の予定（Googleカレンダーから取得）
+let currentWeekStart = mondayOf(new Date());
+let weekEvents = []; // 今表示している週の予定（Googleカレンダーから取得）
+let accessToken = null;
+let tokenClient = null;
+
+let todos = []; // Todo・期限リスト（Supabaseから取得）
+let showCompleted = false;
+let cachedUndated = []; // 期限なしTodoの並び替え用に直近の並び順を保持
+
+const authBanner = document.getElementById('auth-banner');
+const authConnect = document.getElementById('auth-connect');
+
+// Googleのログイン用スクリプトの読み込みを待ってから初期化する
+function initGoogleAuth(){
+  if(!window.google || !google.accounts){
+    setTimeout(initGoogleAuth, 200); // まだ読み込み中なら少し待って再試行
+    return;
+  }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: GOOGLE_SCOPES,
+    callback: function(resp){
+      if(resp.error){
+        alert('Googleとの連携に失敗しました: ' + resp.error);
+        return;
+      }
+      accessToken = resp.access_token;
+      authBanner.style.display = 'none';
+      loadDay();
+    }
+  });
+  authConnect.addEventListener('click', function(){
+    tokenClient.requestAccessToken();
+  });
+  // まだ連携していない場合はバナーを表示
+  authBanner.style.display = 'block';
+}
+initGoogleAuth();
+
+// GoogleカレンダーのイベントデータをアプリのIDを含む予定形式に変換
+function mapGoogleEvent(item){
+  const allDay = !item.start.dateTime;
+  let date, start, end;
+  if(allDay){
+    date = item.start.date;
+    start = '終日';
+    end = '';
+  } else {
+    const s = new Date(item.start.dateTime);
+    const e = new Date(item.end.dateTime);
+    date = localDateStr(s);
+    start = localTimeStr(s);
+    end = localTimeStr(e);
+  }
+  const category = (item.extendedProperties && item.extendedProperties.private && item.extendedProperties.private.category) || 'accent';
+  return { id: item.id, date, start, end, title: item.summary || '(タイトルなし)', category, place: item.location || '', allDay };
+}
+function localDateStr(d){
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function localTimeStr(d){
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
+// 表示している日の予定をGoogleカレンダーから取得
+async function loadDay(){
+  if(!accessToken){ renderDay(); return; }
+  const dayStart = new Date(currentDate); dayStart.setHours(0,0,0,0);
+  const dayEnd = new Date(currentDate); dayEnd.setHours(23,59,59,999);
+  const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
+    + '?timeMin=' + encodeURIComponent(dayStart.toISOString())
+    + '&timeMax=' + encodeURIComponent(dayEnd.toISOString())
+    + '&singleEvents=true&orderBy=startTime';
+  try{
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+    if(res.status === 401){
+      // トークンの期限切れ。もう一度連携してもらう
+      accessToken = null;
+      authBanner.style.display = 'block';
+      dayEvents = [];
+      renderDay();
+      return;
+    }
+    if(!res.ok){ throw new Error('通信に失敗しました（' + res.status + '）'); }
+    const data = await res.json();
+    dayEvents = (data.items || []).map(mapGoogleEvent);
+  } catch(err){
+    alert('Googleカレンダーの読み込みに失敗しました: ' + err.message);
+  }
+  renderDay();
+}
+
+/* ==============================
+   タブ切り替え
+   ============================== */
+document.querySelectorAll('.tab').forEach(function(tab){
+  tab.addEventListener('click', function(ev){
+    ev.stopPropagation();
+    document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+    document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.view).classList.add('active');
+    closeAddForm();
+    closeAllBubbles();
+    if(tab.dataset.view === 'week'){ loadWeek(); }
+    if(tab.dataset.view === 'deadline'){ loadTodos(); }
+    if(tab.dataset.view === 'settings'){ renderSettings(); }
+  });
+});
+
+/* ==============================
+   予定追加ポップアップの開閉
+   固定オーバーレイなので背景のスクロール位置は動かない
+   ============================== */
+const addOverlay = document.getElementById('add-overlay');
+const addForm = document.getElementById('add-form');
+const addToggle = document.getElementById('add-toggle');
+
+let editingEventId = null; // nullなら新規追加、値があればその予定をPATCHで更新
+
+function openAddForm(prefillTime){
+  document.getElementById('f-date').value = localDateStr(currentDate);
+  if(prefillTime){ document.getElementById('f-start').value = prefillTime; }
+  addOverlay.style.display = 'flex';
+  document.body.style.overflow = 'hidden'; // 背景のスクロールを止める
+}
+
+// 予定タップの吹き出し「編集」から呼ばれる。既存の値を入れた状態でボトムシートを開く
+function openEditForm(e){
+  editingEventId = e.id;
+  document.querySelectorAll('.type-btn').forEach(function(b){ b.classList.remove('selected'); });
+  document.querySelector('.type-btn[data-type="event"]').classList.add('selected');
+  document.querySelector('.type-btn[data-type="todo"]').style.display = 'none'; // Google予定のみ編集対象
+  document.getElementById('time-fields').style.display = 'block';
+  document.getElementById('f-category').querySelector('option[value="danger"]').disabled = false;
+  document.getElementById('f-title').value = e.title;
+  document.getElementById('f-date').value = e.date;
+  document.getElementById('f-start').value = e.start;
+  document.getElementById('f-end').value = e.end;
+  document.getElementById('f-category').value = e.category;
+  document.querySelector('.modal-title').textContent = '予定を編集';
+  document.getElementById('f-submit').textContent = '保存する';
+  addOverlay.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeAddForm(){
+  addOverlay.style.display = 'none';
+  document.body.style.overflow = '';
+  editingEventId = null;
+  document.querySelector('.type-btn[data-type="todo"]').style.display = '';
+  document.querySelector('.modal-title').textContent = '予定を追加';
+  document.getElementById('f-submit').textContent = '追加する';
+}
+
+// 今アクティブなタブ（日/週）のデータを再取得して再描画する
+function refreshCurrentView(){
+  if(document.getElementById('day').classList.contains('active')){ loadDay(); }
+  if(document.getElementById('week').classList.contains('active')){ loadWeek(); }
+}
+
+addToggle.addEventListener('click', function(ev){
+  ev.stopPropagation();
+  openAddForm();
+});
+document.getElementById('add-close').addEventListener('click', closeAddForm);
+addOverlay.addEventListener('click', function(ev){
+  if(ev.target === addOverlay){ closeAddForm(); } // 背景（黒い部分）だけタップで閉じる
+});
+
+/* ==============================
+   吹き出し（予定の詳細）を外側タップで閉じる
+   captureフェーズで先に処理することで、他の要素側の
+   stopPropagation() に邪魔されず確実に閉じられるようにする
+   ============================== */
+let activeBubble = null;
+document.addEventListener('click', function(ev){
+  if(activeBubble && activeBubble.style.display === 'block' && !activeBubble.contains(ev.target)){
+    activeBubble.style.display = 'none';
+  }
+}, true);
+function closeAllBubbles(){
+  document.querySelectorAll('.bubble').forEach(function(b){ b.style.display = 'none'; });
+}
+
+document.querySelectorAll('.type-btn').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    document.querySelectorAll('.type-btn').forEach(function(b){ b.classList.remove('selected'); });
+    btn.classList.add('selected');
+    const isTodo = btn.dataset.type === 'todo';
+    document.getElementById('time-fields').style.display = isTodo ? 'none' : 'block';
+    // Todoには「締切」カテゴリは使わない（勉強／仕事のみ）
+    const catSelect = document.getElementById('f-category');
+    const deadlineOpt = catSelect.querySelector('option[value="danger"]');
+    if(deadlineOpt){ deadlineOpt.disabled = isTodo; }
+    if(isTodo && catSelect.value === 'danger'){ catSelect.value = 'accent'; }
+  });
+});
+
+document.getElementById('f-submit').addEventListener('click', async function(){
+  const selectedType = document.querySelector('.type-btn.selected').dataset.type;
+  if(selectedType === 'todo'){
+    const title = document.getElementById('f-title').value.trim();
+    const date = document.getElementById('f-date').value; // 空なら期限なしTodo
+    const categoryVal = document.getElementById('f-category').value;
+    if(!title){ alert('タイトルを入力してください'); return; }
+    if(categoryVal === 'danger'){ alert('Todoには「勉強」か「仕事」を選んでください'); return; }
+    const category = (categoryVal === 'accent') ? 'study' : 'work';
+    try{
+      const sortOrder = date ? 0 : (cachedUndated.reduce(function(m,t){ return Math.max(m, t.sort_order); }, 0) + 1);
+      await insertTodo({ title: title, category: category, due_date: date || null, sort_order: sortOrder });
+      closeAddForm();
+      document.getElementById('f-title').value = '';
+      loadTodos();
+    } catch(err){
+      alert(err.message);
+    }
+    return;
+  }
+  if(!accessToken){
+    alert('先にGoogleカレンダーと連携してください。');
+    return;
+  }
+  const title = document.getElementById('f-title').value.trim();
+  const date = document.getElementById('f-date').value;
+  const start = document.getElementById('f-start').value;
+  const end = document.getElementById('f-end').value;
+  const category = document.getElementById('f-category').value;
+  if(!title || !date || !start || !end){
+    alert('タイトル・日付・時刻を入力してください');
+    return;
+  }
+  const body = {
+    summary: title,
+    start: { dateTime: date + 'T' + start + ':00', timeZone: 'Asia/Tokyo' },
+    end:   { dateTime: date + 'T' + end + ':00', timeZone: 'Asia/Tokyo' },
+    extendedProperties: { private: { category: category } }
+  };
+  const isEdit = !!editingEventId;
+  const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events' + (isEdit ? '/' + editingEventId : '');
+  try{
+    const res = await fetch(url, {
+      method: isEdit ? 'PATCH' : 'POST',
+      headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if(!res.ok){ throw new Error((isEdit ? '更新' : '追加') + 'に失敗しました（' + res.status + '）'); }
+    closeAddForm();
+    document.getElementById('f-title').value = '';
+    refreshCurrentView();
+  } catch(err){
+    alert(err.message);
+  }
+});
+
+/* ==============================
+   日表示：日付ナビゲーション
+   ============================== */
+document.getElementById('day-prev').addEventListener('click', function(){ changeDay(-1); });
+document.getElementById('day-next').addEventListener('click', function(){ changeDay(1); });
+document.getElementById('day-today').addEventListener('click', function(){ currentDate = new Date(); loadDay(); });
+
+function changeDay(delta){
+  currentDate.setDate(currentDate.getDate() + delta);
+  loadDay();
+}
+
+function fmtDateTitle(d){
+  const w = ['日','月','火','水','木','金','土'][d.getDay()];
+  return (d.getMonth()+1) + '月' + d.getDate() + '日（' + w + '）';
+}
+
+// 日表示に切り替えて指定日を表示する（週表示の曜日ヘッダータップから使用）
+function switchToDay(d){
+  currentDate = new Date(d);
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+  document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
+  document.querySelector('.tab[data-view="day"]').classList.add('active');
+  document.getElementById('day').classList.add('active');
+  closeAllBubbles();
+  loadDay();
+}
+
+/* ==============================
+   週表示：週ナビゲーション
+   ============================== */
+function mondayOf(d){
+  const nd = new Date(d);
+  const day = nd.getDay(); // 0=日 ... 6=土
+  const diff = (day === 0) ? -6 : (1 - day);
+  nd.setDate(nd.getDate() + diff);
+  nd.setHours(0,0,0,0);
+  return nd;
+}
+
+function fmtWeekTitle(start){
+  const end = new Date(start); end.setDate(end.getDate() + 6);
+  return (start.getMonth()+1) + '/' + start.getDate() + ' 〜 ' + (end.getMonth()+1) + '/' + end.getDate();
+}
+
+document.getElementById('week-prev').addEventListener('click', function(){ changeWeek(-7); });
+document.getElementById('week-next').addEventListener('click', function(){ changeWeek(7); });
+document.getElementById('week-today').addEventListener('click', function(){ currentWeekStart = mondayOf(new Date()); loadWeek(); });
+
+function changeWeek(deltaDays){
+  currentWeekStart.setDate(currentWeekStart.getDate() + deltaDays);
+  loadWeek();
+}
+
+// 表示している週の予定をGoogleカレンダーから取得
+async function loadWeek(){
+  if(!accessToken){ weekEvents = []; renderWeek(); return; }
+  const weekStart = new Date(currentWeekStart);
+  const weekEnd = new Date(currentWeekStart); weekEnd.setDate(weekEnd.getDate() + 7);
+  const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
+    + '?timeMin=' + encodeURIComponent(weekStart.toISOString())
+    + '&timeMax=' + encodeURIComponent(weekEnd.toISOString())
+    + '&singleEvents=true&orderBy=startTime';
+  try{
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+    if(res.status === 401){
+      accessToken = null;
+      authBanner.style.display = 'block';
+      weekEvents = [];
+      renderWeek();
+      return;
+    }
+    if(!res.ok){ throw new Error('通信に失敗しました（' + res.status + '）'); }
+    const data = await res.json();
+    weekEvents = (data.items || []).map(mapGoogleEvent);
+  } catch(err){
+    alert('Googleカレンダーの読み込みに失敗しました: ' + err.message);
+  }
+  renderWeek();
+}
+
+/* ==============================
+   週表示の描画
+   ============================== */
+function renderWeek(){
+  document.getElementById('week-title').textContent = fmtWeekTitle(currentWeekStart);
+  const grid = document.getElementById('week-grid');
+  grid.innerHTML = '';
+
+  const days = [];
+  for(let i=0;i<7;i++){ const d = new Date(currentWeekStart); d.setDate(d.getDate()+i); days.push(d); }
+
+  const byDate = {};
+  days.forEach(function(d){ byDate[localDateStr(d)] = []; });
+  weekEvents.forEach(function(e){ if(byDate[e.date]){ byDate[e.date].push(e); } });
+
+  const scale = 420 / ((END_HOUR - START_HOUR) * 60);
+  const now = new Date();
+
+  // 時刻列（左端、横スクロールしても固定）
+  const timeHeader = document.createElement('div');
+  timeHeader.className = 'week-time-cell'; timeHeader.style.gridColumn = '1'; timeHeader.style.gridRow = '1';
+  timeHeader.style.background = 'var(--surface)';
+  grid.appendChild(timeHeader);
+
+  const timeAllday = document.createElement('div');
+  timeAllday.className = 'week-time-cell'; timeAllday.style.gridColumn = '1'; timeAllday.style.gridRow = '2';
+  timeAllday.style.background = 'var(--surface)';
+  grid.appendChild(timeAllday);
+
+  const timeBody = document.createElement('div');
+  timeBody.className = 'week-time-cell week-time-body-cell'; timeBody.style.gridColumn = '1'; timeBody.style.gridRow = '3';
+  grid.appendChild(timeBody);
+  for(let h = START_HOUR; h <= END_HOUR; h++){
+    const y = (h - START_HOUR) * 60 * scale;
+    const lbl = document.createElement('div');
+    lbl.className = 'htime'; lbl.style.top = (y - 6) + 'px'; lbl.textContent = h + ':00';
+    timeBody.appendChild(lbl);
+  }
+
+  days.forEach(function(d, idx){
+    const col = idx + 2; // グリッド列（1列目は時刻列）
+    const key = localDateStr(d);
+    const dayList = byDate[key] || [];
+    const timed = dayList.filter(function(e){ return !e.allDay; });
+    const allday = dayList.filter(function(e){ return e.allDay; });
+    const isToday = d.toDateString() === now.toDateString();
+
+    // ヘッダー（曜日・日付）
+    const header = document.createElement('div');
+    header.className = 'week-col-header' + (isToday ? ' is-today' : '');
+    header.style.gridColumn = String(col); header.style.gridRow = '1';
+    header.innerHTML = '<div class="wch-dow">' + ['日','月','火','水','木','金','土'][d.getDay()] + '</div><div class="wch-date">' + d.getDate() + '</div>';
+    header.addEventListener('click', function(ev){ ev.stopPropagation(); switchToDay(d); });
+    grid.appendChild(header);
+
+    // 終日・締切帯
+    const alldayCell = document.createElement('div');
+    alldayCell.className = 'week-allday-cell';
+    alldayCell.style.gridColumn = String(col); alldayCell.style.gridRow = '2';
+    allday.forEach(function(e){
+      const chip = document.createElement('div');
+      chip.className = 'week-allday-chip';
+      chip.textContent = '🚩 ' + e.title;
+      alldayCell.appendChild(chip);
+    });
+    grid.appendChild(alldayCell);
+
+    // タイムライン本体
+    const body = document.createElement('div');
+    body.className = 'week-body-cell';
+    body.style.gridColumn = String(col); body.style.gridRow = '3';
+    grid.appendChild(body);
+
+    for(let h = START_HOUR; h <= END_HOUR; h++){
+      const y = (h - START_HOUR) * 60 * scale;
+      const line = document.createElement('div');
+      line.className = 'hrline'; line.style.top = y + 'px';
+      body.appendChild(line);
+    }
+
+    if(isToday){
+      const nowMin = now.getHours()*60 + now.getMinutes();
+      if(nowMin >= START_HOUR*60 && nowMin <= END_HOUR*60){
+        const y = (nowMin - START_HOUR*60) * scale;
+        const line = document.createElement('div');
+        line.className = 'nowline'; line.style.top = y + 'px';
+        const dot = document.createElement('div');
+        dot.className = 'nowdot';
+        line.appendChild(dot);
+        body.appendChild(line);
+      }
+    }
+
+    // 空き時間タップで追加
+    body.addEventListener('click', function(ev){
+      if(ev.target !== body) return;
+      const rect = body.getBoundingClientRect();
+      const mins = (ev.clientY - rect.top) / scale + START_HOUR*60;
+      const snapped = Math.round(mins/10)*10;
+      const hh = Math.floor(snapped/60), mm = snapped%60;
+      const t = String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+      ev.stopPropagation();
+      currentDate = new Date(d);
+      openAddForm(t);
+    });
+
+    // 吹き出し（詳細・削除）
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    body.appendChild(bubble);
+
+    const laid = layoutOverlaps(timed);
+    laid.forEach(function(e){
+      const top = (toMin(e.start) - START_HOUR*60) * scale;
+      const h = Math.max((toMin(e.end) - toMin(e.start)) * scale, 16);
+      const widthPct = 100 / e.colCount;
+      const box = document.createElement('div');
+      box.className = 'evbox';
+      box.style.top = top + 'px';
+      box.style.height = h + 'px';
+      box.style.left = 'calc(' + (widthPct*e.col) + '% + 1px)';
+      box.style.width = 'calc(' + widthPct + '% - 3px)';
+      box.style.background = 'var(--bg-' + e.category + ')';
+      box.style.borderLeft = '3px solid var(--border-' + e.category + ')';
+
+      const t = document.createElement('p');
+      t.className = 'evtitle evtitle-sm'; t.style.color = 'var(--text-' + e.category + ')'; t.textContent = e.title;
+      box.appendChild(t);
+
+      box.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        closeAllBubbles();
+        bubble.innerHTML =
+          '<p style="font-size:13px;font-weight:500;">' + escapeHtml(e.title) + '</p>' +
+          '<p style="font-size:12px;color:var(--text-secondary);margin-top:2px;">' + e.start + '〜' + e.end + '</p>' +
+          '<p style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + (e.place || '—') + '</p>' +
+          '<div style="display:flex;gap:6px;margin-top:8px;">' +
+          '<button data-act="edit" style="flex:1;font-size:11px;padding:3px 0;">編集</button>' +
+          '<button data-act="del" style="flex:1;font-size:11px;padding:3px 0;color:var(--text-danger);">削除</button>' +
+          '</div>';
+        bubble.querySelector('[data-act="edit"]').addEventListener('click', function(){
+          bubble.style.display = 'none';
+          openEditForm(e);
+        });
+        const delBtn = bubble.querySelector('[data-act="del"]');
+        delBtn.addEventListener('click', async function(){
+          try{
+            const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + e.id, {
+              method: 'DELETE',
+              headers: { Authorization: 'Bearer ' + accessToken }
+            });
+            if(!res.ok && res.status !== 410){ throw new Error('削除に失敗しました（' + res.status + '）'); }
+            bubble.style.display = 'none';
+            loadWeek();
+          } catch(err){
+            alert(err.message);
+          }
+        });
+        const bTop = top + h + 6, layerH = body.offsetHeight || 420;
+        bubble.style.display = 'block';
+        const bH = bubble.offsetHeight;
+        bubble.style.top = (bTop + bH > layerH) ? Math.max(top - bH - 6, 4) + 'px' : bTop + 'px';
+        bubble.style.left = '4px';
+        activeBubble = bubble;
+      });
+
+      body.appendChild(box);
+    });
+  });
+}
+
+/* ==============================
+   時間の重なりを列に振り分ける
+   ============================== */
+function toMin(str){ const p = str.split(':'); return (+p[0])*60 + (+p[1]); }
+
+function layoutOverlaps(evts){
+  const sorted = evts.slice().sort(function(a,b){ return toMin(a.start) - toMin(b.start); });
+  const clusters = [];
+  let current = [], curEnd = -1;
+  sorted.forEach(function(e){
+    const s = toMin(e.start);
+    if(current.length === 0 || s < curEnd){
+      current.push(e);
+      curEnd = Math.max(curEnd, toMin(e.end));
+    } else {
+      clusters.push(current);
+      current = [e];
+      curEnd = toMin(e.end);
+    }
+  });
+  if(current.length) clusters.push(current);
+  clusters.forEach(function(cluster){
+    const cols = [];
+    cluster.forEach(function(e){
+      const s = toMin(e.start);
+      let placed = false;
+      for(let i=0;i<cols.length;i++){
+        if(toMin(cols[i]) <= s){ e.col = i; cols[i] = e.end; placed = true; break; }
+      }
+      if(!placed){ e.col = cols.length; cols.push(e.end); }
+    });
+    cluster.forEach(function(e){ e.colCount = cols.length; });
+  });
+  return sorted;
+}
+
+/* ==============================
+   日表示の描画
+   ============================== */
+const START_HOUR = 7, END_HOUR = 23;
+
+function renderDay(){
+  document.getElementById('day-title').textContent = fmtDateTitle(currentDate);
+  const timedEvents = dayEvents.filter(function(e){ return !e.allDay; });
+  const allDayEvents = dayEvents.filter(function(e){ return e.allDay; });
+
+  // 終日／締切帯
+  const alldayArea = document.getElementById('allday-area');
+  alldayArea.innerHTML = '';
+  allDayEvents.forEach(function(e){
+    const row = document.createElement('div');
+    row.className = 'allday-row';
+    row.innerHTML = '<span>🚩 ' + escapeHtml(e.title) + '</span><span>' + e.start + '</span>';
+    alldayArea.appendChild(row);
+  });
+
+  // グリッド・ラベル
+  const labelsEl = document.getElementById('day-labels');
+  const gridEl = document.getElementById('day-gridlines');
+  const eventsEl = document.getElementById('day-events');
+  labelsEl.innerHTML = ''; gridEl.innerHTML = ''; eventsEl.innerHTML = '';
+
+  const pxHeight = 420;
+  const scale = pxHeight / ((END_HOUR - START_HOUR) * 60);
+  for(let h = START_HOUR; h <= END_HOUR; h++){
+    const y = (h - START_HOUR) * 60 * scale;
+    const line = document.createElement('div');
+    line.className = 'hrline'; line.style.top = y + 'px';
+    gridEl.appendChild(line);
+    const lbl = document.createElement('div');
+    lbl.className = 'htime'; lbl.style.top = (y - 6) + 'px'; lbl.textContent = h + ':00';
+    labelsEl.appendChild(lbl);
+  }
+
+  // 現在時刻ライン（今日を表示しているときだけ）
+  const now = new Date();
+  const isToday = now.toDateString() === currentDate.toDateString();
+  if(isToday){
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    if(nowMin >= START_HOUR*60 && nowMin <= END_HOUR*60){
+      const y = (nowMin - START_HOUR*60) * scale;
+      const line = document.createElement('div');
+      line.className = 'nowline'; line.style.top = y + 'px';
+      const dot = document.createElement('div');
+      dot.className = 'nowdot';
+      line.appendChild(dot);
+      eventsEl.appendChild(line);
+    }
+  }
+
+  // 空き時間タップで追加
+  eventsEl.addEventListener('click', function onEmptyTap(ev){
+    if(ev.target !== eventsEl) return;
+    const rect = eventsEl.getBoundingClientRect();
+    const mins = (ev.clientY - rect.top) / scale + START_HOUR*60;
+    const snapped = Math.round(mins/10)*10;
+    const hh = Math.floor(snapped/60), mm = snapped%60;
+    const t = String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+    ev.stopPropagation();
+    openAddForm(t);
+  });
+
+  // 吹き出し（詳細・編集・削除）
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  eventsEl.appendChild(bubble);
+  activeBubble = bubble;
+
+  const laid = layoutOverlaps(timedEvents);
+  laid.forEach(function(e){
+    const top = (toMin(e.start) - START_HOUR*60) * scale;
+    const h = Math.max((toMin(e.end) - toMin(e.start)) * scale, 16);
+    const widthPct = 100 / e.colCount;
+    const box = document.createElement('div');
+    box.className = 'evbox';
+    box.style.top = top + 'px';
+    box.style.height = h + 'px';
+    box.style.left = 'calc(' + (widthPct*e.col) + '% + 1px)';
+    box.style.width = 'calc(' + widthPct + '% - 3px)';
+    box.style.background = 'var(--bg-' + e.category + ')';
+    box.style.borderLeft = '3px solid var(--border-' + e.category + ')';
+
+    const t = document.createElement('p');
+    t.className = 'evtitle'; t.style.color = 'var(--text-' + e.category + ')'; t.textContent = e.title;
+    const tm = document.createElement('p');
+    tm.className = 'evtime'; tm.style.color = 'var(--text-' + e.category + ')'; tm.textContent = e.start + '–' + e.end;
+    box.appendChild(t); box.appendChild(tm);
+
+    box.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      bubble.innerHTML =
+        '<p style="font-size:13px;font-weight:500;">' + escapeHtml(e.title) + '</p>' +
+        '<p style="font-size:12px;color:var(--text-secondary);margin-top:2px;">' + e.start + '〜' + e.end + '</p>' +
+        '<p style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + (e.place || '—') + '</p>' +
+        '<div style="display:flex;gap:6px;margin-top:8px;">' +
+        '<button data-act="edit" style="flex:1;font-size:11px;padding:3px 0;">編集</button>' +
+        '<button data-act="del" style="flex:1;font-size:11px;padding:3px 0;color:var(--text-danger);">削除</button>' +
+        '</div>';
+      bubble.querySelector('[data-act="edit"]').addEventListener('click', function(){
+        bubble.style.display = 'none';
+        openEditForm(e);
+      });
+      const delBtn = bubble.querySelector('[data-act="del"]');
+      delBtn.addEventListener('click', async function(){
+        try{
+          const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + e.id, {
+            method: 'DELETE',
+            headers: { Authorization: 'Bearer ' + accessToken }
+          });
+          if(!res.ok && res.status !== 410){ throw new Error('削除に失敗しました（' + res.status + '）'); }
+          bubble.style.display = 'none';
+          loadDay();
+        } catch(err){
+          alert(err.message);
+        }
+      });
+      const bTop = top + h + 6, layerH = eventsEl.offsetHeight || pxHeight;
+      bubble.style.display = 'block';
+      const bH = bubble.offsetHeight;
+      bubble.style.top = (bTop + bH > layerH) ? Math.max(top - bH - 6, 4) + 'px' : bTop + 'px';
+      const bLeft = (widthPct*e.col/100) * eventsEl.offsetWidth;
+      const maxLeft = eventsEl.offsetWidth - 180;
+      bubble.style.left = Math.max(0, Math.min(bLeft, maxLeft)) + 'px';
+    });
+
+    eventsEl.appendChild(box);
+  });
+}
+
+function escapeHtml(s){
+  return s.replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+
+/* ==============================
+   Todo・期限リスト（Supabase連携）
+   ============================== */
+async function loadTodos(){
+  try{
+    const res = await fetch(SUPABASE_URL + '/rest/v1/todos?select=*&order=due_date.asc.nullslast,sort_order.asc,created_at.asc', {
+      headers: SUPABASE_HEADERS
+    });
+    if(!res.ok){ throw new Error('Todoの読み込みに失敗しました（' + res.status + '）'); }
+    todos = await res.json();
+  } catch(err){
+    alert(err.message);
+  }
+  renderDeadline();
+}
+
+async function insertTodo(todo){
+  const res = await fetch(SUPABASE_URL + '/rest/v1/todos', {
+    method: 'POST',
+    headers: Object.assign({}, SUPABASE_HEADERS, { Prefer: 'return=representation' }),
+    body: JSON.stringify(todo)
+  });
+  if(!res.ok){ throw new Error('追加に失敗しました（' + res.status + '）'); }
+  return (await res.json())[0];
+}
+
+async function updateTodo(id, patch){
+  const res = await fetch(SUPABASE_URL + '/rest/v1/todos?id=eq.' + id, {
+    method: 'PATCH',
+    headers: Object.assign({}, SUPABASE_HEADERS, { Prefer: 'return=representation' }),
+    body: JSON.stringify(patch)
+  });
+  if(!res.ok){ throw new Error('更新に失敗しました（' + res.status + '）'); }
+  return (await res.json())[0];
+}
+
+async function deleteTodo(id){
+  const res = await fetch(SUPABASE_URL + '/rest/v1/todos?id=eq.' + id, {
+    method: 'DELETE',
+    headers: SUPABASE_HEADERS
+  });
+  if(!res.ok){ throw new Error('削除に失敗しました（' + res.status + '）'); }
+}
+
+async function moveTodo(t, dir){
+  const idx = cachedUndated.findIndex(function(x){ return x.id === t.id; });
+  const swapIdx = idx + dir;
+  if(idx === -1 || swapIdx < 0 || swapIdx >= cachedUndated.length){ return; }
+  const other = cachedUndated[swapIdx];
+  try{
+    await updateTodo(t.id, { sort_order: other.sort_order });
+    await updateTodo(other.id, { sort_order: t.sort_order });
+    loadTodos();
+  } catch(err){
+    alert(err.message);
+  }
+}
+
+function daysUntil(dateStr){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const due = new Date(dateStr + 'T00:00:00');
+  return Math.round((due - today) / 86400000);
+}
+
+function fmtDueMeta(dateStr){
+  const d = daysUntil(dateStr);
+  const dt = new Date(dateStr + 'T00:00:00');
+  const label = (dt.getMonth()+1) + '/' + dt.getDate() + '（' + ['日','月','火','水','木','金','土'][dt.getDay()] + '）';
+  let rest;
+  if(d < 0){ rest = '期限切れ'; }
+  else if(d === 0){ rest = '今日'; }
+  else if(d === 1){ rest = '明日'; }
+  else { rest = 'あと' + d + '日'; }
+  return label + ' ・ ' + rest;
+}
+
+function todoRowEl(t){
+  const row = document.createElement('div');
+  row.className = 'deadline-row';
+  if(t.due_date){
+    const d = daysUntil(t.due_date);
+    const redT = (settings && settings.threshold_red_days != null) ? settings.threshold_red_days : 1;
+    const yellowT = (settings && settings.threshold_yellow_days != null) ? settings.threshold_yellow_days : 3;
+    let colorClass = '';
+    if(d <= redT){ colorClass = 'danger'; }
+    else if(d <= yellowT){ colorClass = 'warning'; }
+    if(colorClass){
+      row.style.background = 'var(--bg-' + colorClass + ')';
+      row.style.borderColor = 'var(--border-' + colorClass + ')';
+      row.style.color = 'var(--text-' + colorClass + ')';
+    }
+  }
+  if(t.completed){ row.classList.add('is-completed'); }
+
+  const check = document.createElement('input');
+  check.type = 'checkbox'; check.checked = t.completed;
+  check.addEventListener('change', async function(){
+    try{ await updateTodo(t.id, { completed: check.checked }); loadTodos(); }
+    catch(err){ alert(err.message); }
+  });
+
+  const title = document.createElement('span');
+  title.className = 'dr-title'; title.textContent = t.title;
+
+  const meta = document.createElement('span');
+  meta.className = 'dr-meta';
+  meta.textContent = t.due_date ? fmtDueMeta(t.due_date) : '';
+
+  row.appendChild(check); row.appendChild(title); row.appendChild(meta);
+
+  if(!t.due_date){
+    const up = document.createElement('button');
+    up.textContent = '↑'; up.className = 'dr-move';
+    up.addEventListener('click', function(){ moveTodo(t, -1); });
+    const down = document.createElement('button');
+    down.textContent = '↓'; down.className = 'dr-move';
+    down.addEventListener('click', function(){ moveTodo(t, 1); });
+    row.appendChild(up); row.appendChild(down);
+  }
+
+  const del = document.createElement('button');
+  del.textContent = '削除'; del.className = 'dr-del';
+  del.addEventListener('click', async function(){
+    try{ await deleteTodo(t.id); loadTodos(); }
+    catch(err){ alert(err.message); }
+  });
+  row.appendChild(del);
+
+  return row;
+}
+
+function renderDeadline(){
+  const todayStr = localDateStr(new Date());
+  const overdueWrap = document.getElementById('overdue-wrap');
+  const studyList = document.getElementById('deadline-study');
+  const workList = document.getElementById('deadline-work');
+  const todoList = document.getElementById('todo-list');
+  overdueWrap.innerHTML = ''; studyList.innerHTML = ''; workList.innerHTML = ''; todoList.innerHTML = '';
+
+  const overdue = todos.filter(function(t){ return t.due_date && t.due_date < todayStr && !t.completed; });
+  const study = todos.filter(function(t){ return t.category === 'study' && t.due_date && t.due_date >= todayStr && (showCompleted || !t.completed); });
+  const work = todos.filter(function(t){ return t.category === 'work' && t.due_date && t.due_date >= todayStr && (showCompleted || !t.completed); });
+  const undated = todos.filter(function(t){ return !t.due_date && (showCompleted || !t.completed); })
+    .sort(function(a,b){ return a.sort_order - b.sort_order; });
+  cachedUndated = undated;
+
+  if(overdue.length){
+    const title = document.createElement('p');
+    title.className = 'deadline-section-title'; title.textContent = '期限切れ';
+    overdueWrap.appendChild(title);
+    overdue.forEach(function(t){ overdueWrap.appendChild(todoRowEl(t)); });
+  }
+  study.forEach(function(t){ studyList.appendChild(todoRowEl(t)); });
+  work.forEach(function(t){ workList.appendChild(todoRowEl(t)); });
+  undated.forEach(function(t){ todoList.appendChild(todoRowEl(t)); });
+}
+
+document.getElementById('deadline-toggle-completed').addEventListener('click', function(){
+  showCompleted = !showCompleted;
+  this.textContent = showCompleted ? '完了を隠す' : '完了を表示';
+  renderDeadline();
+});
+
+/* ==============================
+   設定（背景写真・通知タイミング・色分けしきい値、Supabase連携）
+   ============================== */
+let settings = null;
+
+async function loadSettings(){
+  try{
+    const res = await fetch(SUPABASE_URL + '/rest/v1/settings?id=eq.1&select=*', { headers: SUPABASE_HEADERS });
+    if(!res.ok){ throw new Error('設定の読み込みに失敗しました（' + res.status + '）'); }
+    const rows = await res.json();
+    settings = rows[0];
+  } catch(err){
+    alert(err.message);
+    return;
+  }
+  renderSettings();
+  applyBackground();
+}
+
+async function saveSettings(patch){
+  const res = await fetch(SUPABASE_URL + '/rest/v1/settings?id=eq.1', {
+    method: 'PATCH',
+    headers: Object.assign({}, SUPABASE_HEADERS, { Prefer: 'return=representation' }),
+    body: JSON.stringify(patch)
+  });
+  if(!res.ok){ throw new Error('設定の保存に失敗しました（' + res.status + '）'); }
+  settings = (await res.json())[0];
+  applyBackground();
+}
+
+function renderSettings(){
+  if(!settings) return;
+  document.getElementById('bg-pos-x').value = settings.bg_pos_x;
+  document.getElementById('bg-pos-y').value = settings.bg_pos_y;
+  document.getElementById('bg-opacity').value = Math.round(settings.bg_opacity * 100);
+  document.getElementById('notify-days').value = settings.notify_days_before;
+  document.getElementById('notify-hours').value = settings.notify_hours_before;
+  document.getElementById('threshold-red').value = settings.threshold_red_days;
+  document.getElementById('threshold-yellow').value = settings.threshold_yellow_days;
+  updateBgPreview();
+}
+
+function updateBgPreview(){
+  const preview = document.getElementById('bg-preview');
+  if(settings && settings.bg_photo_url){
+    preview.style.backgroundImage = 'url(' + settings.bg_photo_url + ')';
+    preview.style.backgroundPosition = settings.bg_pos_x + '% ' + settings.bg_pos_y + '%';
+  } else {
+    preview.style.backgroundImage = 'none';
+  }
+}
+
+function applyBackground(){
+  const layer = document.getElementById('bg-layer');
+  if(settings && settings.bg_photo_url){
+    layer.style.backgroundImage = 'url(' + settings.bg_photo_url + ')';
+    layer.style.backgroundPosition = settings.bg_pos_x + '% ' + settings.bg_pos_y + '%';
+    layer.style.opacity = settings.bg_opacity;
+    document.body.classList.add('has-bg');
+  } else {
+    layer.style.backgroundImage = 'none';
+    layer.style.opacity = 0;
+    document.body.classList.remove('has-bg');
+  }
+}
+
+document.getElementById('bg-upload-btn').addEventListener('click', function(){
+  document.getElementById('bg-file').click();
+});
+
+document.getElementById('bg-file').addEventListener('change', async function(){
+  const file = this.files[0];
+  this.value = '';
+  if(!file) return;
+  try{
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = 'bg-' + Date.now() + '.' + ext;
+    const res = await fetch(SUPABASE_URL + '/storage/v1/object/backgrounds/' + path, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': file.type },
+      body: file
+    });
+    if(!res.ok){ throw new Error('アップロードに失敗しました（' + res.status + '）'); }
+    const publicUrl = SUPABASE_URL + '/storage/v1/object/public/backgrounds/' + path;
+    await saveSettings({ bg_photo_url: publicUrl });
+    renderSettings();
+  } catch(err){
+    alert(err.message);
+  }
+});
+
+document.getElementById('bg-remove-btn').addEventListener('click', async function(){
+  try{
+    await saveSettings({ bg_photo_url: null });
+    renderSettings();
+  } catch(err){
+    alert(err.message);
+  }
+});
+
+['bg-pos-x', 'bg-pos-y', 'bg-opacity'].forEach(function(id){
+  document.getElementById(id).addEventListener('input', function(){
+    const x = +document.getElementById('bg-pos-x').value;
+    const y = +document.getElementById('bg-pos-y').value;
+    const op = +document.getElementById('bg-opacity').value / 100;
+    const layer = document.getElementById('bg-layer');
+    layer.style.backgroundPosition = x + '% ' + y + '%';
+    layer.style.opacity = op;
+    updateBgPreview();
+  });
+});
+
+document.getElementById('settings-save').addEventListener('click', async function(){
+  const patch = {
+    bg_pos_x: +document.getElementById('bg-pos-x').value,
+    bg_pos_y: +document.getElementById('bg-pos-y').value,
+    bg_opacity: +document.getElementById('bg-opacity').value / 100,
+    notify_days_before: +document.getElementById('notify-days').value,
+    notify_hours_before: +document.getElementById('notify-hours').value,
+    threshold_red_days: +document.getElementById('threshold-red').value,
+    threshold_yellow_days: +document.getElementById('threshold-yellow').value
+  };
+  try{
+    await saveSettings(patch);
+    renderDeadline();
+    alert('保存しました');
+  } catch(err){
+    alert(err.message);
+  }
+});
+
+renderDay();
+loadSettings();
+</script>
+</body>
+</html>
