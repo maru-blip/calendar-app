@@ -2,3 +2,4 @@
 .playwright-mcp/
 server.log
 .claude/
+dist_deploy/
