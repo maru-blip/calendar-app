@@ -178,6 +178,20 @@
   }
   body.has-bg{ background:transparent; }
 
+  /* ログイン画面（Supabase Authでのメールログイン、本人確認できるまでアプリ本体は隠す） */
+  #login-gate{
+    position:fixed; inset:0; z-index:100; background:var(--bg-page);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  #login-card{
+    width:100%; max-width:320px; background:var(--surface); border-radius:var(--radius);
+    padding:24px; box-shadow:var(--shadow-popover); text-align:center; box-sizing:border-box;
+  }
+  #login-title{ font-size:16px; font-weight:500; margin:0 0 8px; }
+  #login-desc{ font-size:13px; color:var(--text-secondary); margin:0 0 16px; }
+  body.authed #login-gate{ display:none; }
+  body:not(.authed) .app{ display:none; }
+
   /* 設定画面 */
   .settings-section{ background:var(--surface); border-radius:var(--radius); padding:16px; margin-bottom:16px; }
   .settings-section-title{ font-size:13px; font-weight:500; color:var(--text-secondary); margin:0 0 12px; }
@@ -194,6 +208,15 @@
 </style>
 </head>
 <body>
+<div id="login-gate">
+  <div id="login-card">
+    <p id="login-title">ログイン</p>
+    <p id="login-desc">登録済みのメールアドレスにログイン用リンクを送ります。届いたメールのリンクを開くとログインできます。</p>
+    <input type="text" id="login-email" placeholder="メールアドレス" inputmode="email" style="width:100%;">
+    <button id="login-send" style="width:100%; background:var(--brand); color:var(--brand-contrast); margin-top:10px;">ログインリンクを送る</button>
+    <p id="login-status" class="hint"></p>
+  </div>
+</div>
 <div id="bg-layer"></div>
 <div class="app">
 
@@ -365,6 +388,7 @@
     </div>
 
     <button id="settings-save" style="width:100%; background:var(--brand); color:var(--brand-contrast);">保存する</button>
+    <button id="logout-btn" style="width:100%; margin-top:10px;">ログアウト</button>
   </div>
 
 </div>
@@ -378,11 +402,99 @@ const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar';
 
 const SUPABASE_URL = 'https://ixkxavusivoeafmmunqn.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_3jfIqBv1qBVxb-JpJZ0Wyg_LatUzQek';
-const SUPABASE_HEADERS = {
-  apikey: SUPABASE_KEY,
-  Authorization: 'Bearer ' + SUPABASE_KEY,
-  'Content-Type': 'application/json'
-};
+
+/* ==============================
+   Supabaseログイン（メールリンク方式）
+   Todo/設定/背景写真はRLSで本人（ログイン済みのメールアドレス一致）のみ操作可能にしてある。
+   anon keyは公開前提のキーなので、実際のアクセス制御はこのログイン＋RLS側で行う。
+   ============================== */
+const AUTH_STORAGE_KEY = 'calendar_app_session';
+
+function getSession(){
+  try{ return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null'); }
+  catch(e){ return null; }
+}
+function setSession(s){ localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(s)); }
+function clearSession(){ localStorage.removeItem(AUTH_STORAGE_KEY); }
+function showApp(){ document.body.classList.add('authed'); loadSettings(); }
+function showLoginGate(){ document.body.classList.remove('authed'); }
+
+async function refreshSession(session){
+  try{
+    const res = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: session.refresh_token })
+    });
+    if(!res.ok){ return null; }
+    const data = await res.json();
+    const newSession = { access_token: data.access_token, refresh_token: data.refresh_token, expires_at: Math.floor(Date.now()/1000) + data.expires_in };
+    setSession(newSession);
+    return newSession;
+  } catch(e){ return null; }
+}
+
+// Supabaseへのデータ操作は必ずこれ経由にする。トークン切れなら自動リフレッシュし、それも失敗したらログイン画面に戻す
+async function supabaseFetch(url, options){
+  options = options || {};
+  let session = getSession();
+  function doFetch(token){
+    const headers = Object.assign({ apikey: SUPABASE_KEY, Authorization: 'Bearer ' + token }, options.headers || {});
+    return fetch(url, Object.assign({}, options, { headers: headers }));
+  }
+  let res = await doFetch(session ? session.access_token : SUPABASE_KEY);
+  if(res.status === 401 && session && session.refresh_token){
+    const refreshed = await refreshSession(session);
+    if(refreshed){ res = await doFetch(refreshed.access_token); }
+  }
+  if(res.status === 401){
+    clearSession();
+    showLoginGate();
+  }
+  return res;
+}
+
+async function initAuth(){
+  // メールのリンクから戻ってきた場合、URLのハッシュにトークンが入っている
+  if(location.hash && location.hash.indexOf('access_token') !== -1){
+    const params = new URLSearchParams(location.hash.substring(1));
+    const access_token = params.get('access_token');
+    const refresh_token = params.get('refresh_token');
+    const expires_in = params.get('expires_in');
+    if(access_token){
+      setSession({ access_token: access_token, refresh_token: refresh_token, expires_at: Math.floor(Date.now()/1000) + Number(expires_in || 3600) });
+      history.replaceState(null, '', location.pathname);
+    }
+  }
+  let session = getSession();
+  if(session && session.expires_at <= Math.floor(Date.now()/1000) + 30){
+    session = await refreshSession(session);
+  }
+  if(session && session.access_token){ showApp(); } else { showLoginGate(); }
+}
+
+document.getElementById('login-send').addEventListener('click', async function(){
+  const email = document.getElementById('login-email').value.trim();
+  const statusEl = document.getElementById('login-status');
+  if(!email){ statusEl.textContent = 'メールアドレスを入力してください'; return; }
+  statusEl.textContent = '送信中…';
+  try{
+    const res = await fetch(SUPABASE_URL + '/auth/v1/otp?redirect_to=' + encodeURIComponent(location.origin + location.pathname), {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, create_user: true })
+    });
+    if(!res.ok){ throw new Error('送信に失敗しました（' + res.status + '）'); }
+    statusEl.textContent = 'メールを送りました。届いたリンクを開いてください。';
+  } catch(err){
+    statusEl.textContent = err.message;
+  }
+});
+
+document.getElementById('logout-btn').addEventListener('click', function(){
+  clearSession();
+  showLoginGate();
+});
 
 let currentDate = new Date();
 let dayEvents = []; // 今表示している日の予定（Googleカレンダーから取得）
@@ -1073,9 +1185,7 @@ function escapeHtml(s){
    ============================== */
 async function loadTodos(){
   try{
-    const res = await fetch(SUPABASE_URL + '/rest/v1/todos?select=*&order=due_date.asc.nullslast,sort_order.asc,created_at.asc', {
-      headers: SUPABASE_HEADERS
-    });
+    const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/todos?select=*&order=due_date.asc.nullslast,sort_order.asc,created_at.asc');
     if(!res.ok){ throw new Error('Todoの読み込みに失敗しました（' + res.status + '）'); }
     todos = await res.json();
   } catch(err){
@@ -1085,9 +1195,9 @@ async function loadTodos(){
 }
 
 async function insertTodo(todo){
-  const res = await fetch(SUPABASE_URL + '/rest/v1/todos', {
+  const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/todos', {
     method: 'POST',
-    headers: Object.assign({}, SUPABASE_HEADERS, { Prefer: 'return=representation' }),
+    headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
     body: JSON.stringify(todo)
   });
   if(!res.ok){ throw new Error('追加に失敗しました（' + res.status + '）'); }
@@ -1095,9 +1205,9 @@ async function insertTodo(todo){
 }
 
 async function updateTodo(id, patch){
-  const res = await fetch(SUPABASE_URL + '/rest/v1/todos?id=eq.' + id, {
+  const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/todos?id=eq.' + id, {
     method: 'PATCH',
-    headers: Object.assign({}, SUPABASE_HEADERS, { Prefer: 'return=representation' }),
+    headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
     body: JSON.stringify(patch)
   });
   if(!res.ok){ throw new Error('更新に失敗しました（' + res.status + '）'); }
@@ -1105,9 +1215,8 @@ async function updateTodo(id, patch){
 }
 
 async function deleteTodo(id){
-  const res = await fetch(SUPABASE_URL + '/rest/v1/todos?id=eq.' + id, {
-    method: 'DELETE',
-    headers: SUPABASE_HEADERS
+  const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/todos?id=eq.' + id, {
+    method: 'DELETE'
   });
   if(!res.ok){ throw new Error('削除に失敗しました（' + res.status + '）'); }
 }
@@ -1238,7 +1347,7 @@ let settings = null;
 
 async function loadSettings(){
   try{
-    const res = await fetch(SUPABASE_URL + '/rest/v1/settings?id=eq.1&select=*', { headers: SUPABASE_HEADERS });
+    const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/settings?id=eq.1&select=*');
     if(!res.ok){ throw new Error('設定の読み込みに失敗しました（' + res.status + '）'); }
     const rows = await res.json();
     settings = rows[0];
@@ -1251,9 +1360,9 @@ async function loadSettings(){
 }
 
 async function saveSettings(patch){
-  const res = await fetch(SUPABASE_URL + '/rest/v1/settings?id=eq.1', {
+  const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/settings?id=eq.1', {
     method: 'PATCH',
-    headers: Object.assign({}, SUPABASE_HEADERS, { Prefer: 'return=representation' }),
+    headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
     body: JSON.stringify(patch)
   });
   if(!res.ok){ throw new Error('設定の保存に失敗しました（' + res.status + '）'); }
@@ -1308,9 +1417,9 @@ document.getElementById('bg-file').addEventListener('change', async function(){
   try{
     const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
     const path = 'bg-' + Date.now() + '.' + ext;
-    const res = await fetch(SUPABASE_URL + '/storage/v1/object/backgrounds/' + path, {
+    const res = await supabaseFetch(SUPABASE_URL + '/storage/v1/object/backgrounds/' + path, {
       method: 'POST',
-      headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': file.type },
+      headers: { 'Content-Type': file.type },
       body: file
     });
     if(!res.ok){ throw new Error('アップロードに失敗しました（' + res.status + '）'); }
@@ -1363,7 +1472,7 @@ document.getElementById('settings-save').addEventListener('click', async functio
 });
 
 renderDay();
-loadSettings();
+initAuth();
 </script>
 </body>
 </html>
