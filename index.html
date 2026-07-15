@@ -482,10 +482,11 @@ document.getElementById('login-send').addEventListener('click', async function()
     const res = await fetch(SUPABASE_URL + '/auth/v1/otp?redirect_to=' + encodeURIComponent(location.origin + location.pathname), {
       method: 'POST',
       headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email, create_user: true })
+      body: JSON.stringify({ email: email, create_user: false })
     });
+    // create_user:falseの場合、未登録メールでは通信自体は成功するがメールは送られない（ユーザー存在の詮索を防ぐための仕様）
     if(!res.ok){ throw new Error('送信に失敗しました（' + res.status + '）'); }
-    statusEl.textContent = 'メールを送りました。届いたリンクを開いてください。';
+    statusEl.textContent = '登録済みのアドレスであれば、メールを送りました。届いたリンクを開いてください。';
   } catch(err){
     statusEl.textContent = err.message;
   }
