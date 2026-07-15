@@ -96,6 +96,11 @@
   .flabel{ font-size:12px; color:var(--text-secondary); display:block; margin-bottom:4px; }
   .type-btn.selected{ background:var(--brand); color:var(--brand-contrast); border-color:var(--brand); }
   #add-form .row{ display:flex; gap:8px; }
+  .notif-chip{
+    display:flex; align-items:center; gap:4px; background:var(--bg-accent); color:var(--text-accent);
+    border-radius:14px; padding:4px 8px; font-size:12px;
+  }
+  .notif-chip button{ padding:0 2px; border:none; background:none; font-size:12px; color:inherit; }
   #add-form .row > *{ flex:1; }
 
   /* 日表示ヘッダー */
@@ -273,6 +278,16 @@
         <option value="danger">締切</option>
       </select>
     </div>
+    <div class="field" id="notif-field" style="display:none;">
+      <span class="flabel">通知タイミング</span>
+      <div id="notif-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;"></div>
+      <div class="row">
+        <input type="number" id="notif-days" min="0" placeholder="◯日前" style="width:100%">
+        <input type="number" id="notif-hours" min="0" max="23" placeholder="◯時間前" style="width:100%">
+        <button id="notif-add-btn" type="button">＋追加</button>
+      </div>
+      <button id="notif-add-default-btn" type="button" style="width:100%; margin-top:6px;">＋設定の既定値を追加</button>
+    </div>
     <button id="f-submit" style="width:100%; background:var(--brand); color:var(--brand-contrast);">追加する</button>
   </div>
   </div>
@@ -364,7 +379,8 @@
     </div>
 
     <div class="settings-section">
-      <p class="settings-section-title">通知タイミング</p>
+      <p class="settings-section-title">通知タイミングの既定値</p>
+      <p class="hint" style="margin:0 0 10px;">予定追加フォームで「＋既定値を追加」を押したときに使われる値です</p>
       <div class="field">
         <span class="flabel">期限の何日前に通知するか</span>
         <input type="number" id="notify-days" min="0">
@@ -373,6 +389,23 @@
         <span class="flabel">当日、何時間前に通知するか</span>
         <input type="number" id="notify-hours" min="0" max="23">
       </div>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">Push通知</p>
+      <p id="push-status" class="hint" style="margin:0 0 10px;">この端末では通知を受け取っていません</p>
+      <button id="push-subscribe-btn" style="width:100%;">この端末で通知を受け取る</button>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">共有メンバー</p>
+      <p class="hint" style="margin:0 0 10px;">ここに追加したメールアドレスの人も、同じTodo・設定・カレンダーをログインして見られるようになります</p>
+      <div class="deadline-list" id="member-list" style="margin-bottom:12px;"></div>
+      <div class="settings-row">
+        <input type="text" id="member-email" placeholder="メールアドレス" inputmode="email" style="flex:1;">
+        <button id="member-invite-btn">招待する</button>
+      </div>
+      <p id="member-status" class="hint"></p>
     </div>
 
     <div class="settings-section">
@@ -403,6 +436,9 @@ const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar';
 const SUPABASE_URL = 'https://ixkxavusivoeafmmunqn.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_3jfIqBv1qBVxb-JpJZ0Wyg_LatUzQek';
 
+// Push通知用のVAPID公開鍵（公開して問題ない値。秘密鍵はSupabase Edge Functionのシークレットにのみ保存）
+const VAPID_PUBLIC_KEY = 'BBwBeENBZLX0hhCoQW58MhYZo_FUeO1BqvjEMQLUPpC4tnQ02WwimTb1sQuHO5--luQSdOu4cRvPdgUyL0fnd04';
+
 /* ==============================
    Supabaseログイン（メールリンク方式）
    Todo/設定/背景写真はRLSで本人（ログイン済みのメールアドレス一致）のみ操作可能にしてある。
@@ -416,7 +452,7 @@ function getSession(){
 }
 function setSession(s){ localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(s)); }
 function clearSession(){ localStorage.removeItem(AUTH_STORAGE_KEY); }
-function showApp(){ document.body.classList.add('authed'); loadSettings(); }
+function showApp(){ document.body.classList.add('authed'); loadSettings(); loadMembers(); updatePushStatus(); }
 function showLoginGate(){ document.body.classList.remove('authed'); }
 
 async function refreshSession(session){
@@ -618,10 +654,60 @@ const addForm = document.getElementById('add-form');
 const addToggle = document.getElementById('add-toggle');
 
 let editingEventId = null; // nullなら新規追加、値があればその予定をPATCHで更新
+let pendingNotifications = []; // Todo保存前に貯めておく通知タイミング {days_before, hours_before}
+
+function renderNotifChips(){
+  const wrap = document.getElementById('notif-chips');
+  wrap.innerHTML = '';
+  pendingNotifications.forEach(function(n, idx){
+    const chip = document.createElement('span');
+    chip.className = 'notif-chip';
+    const parts = [];
+    if(n.days_before > 0){ parts.push(n.days_before + '日前'); }
+    if(n.hours_before > 0){ parts.push(n.hours_before + '時間前'); }
+    if(!parts.length){ parts.push('当日'); }
+    const label = document.createElement('span');
+    label.textContent = parts.join(' ');
+    chip.appendChild(label);
+    const del = document.createElement('button');
+    del.type = 'button'; del.textContent = '✕';
+    del.addEventListener('click', function(){ pendingNotifications.splice(idx, 1); renderNotifChips(); });
+    chip.appendChild(del);
+    wrap.appendChild(chip);
+  });
+}
+
+// TodoかつCの日付ありのときだけ通知タイミングの欄を出す
+function updateNotifFieldVisibility(){
+  const isTodo = document.querySelector('.type-btn.selected').dataset.type === 'todo';
+  const hasDate = !!document.getElementById('f-date').value;
+  document.getElementById('notif-field').style.display = (isTodo && hasDate) ? 'block' : 'none';
+}
+document.getElementById('f-date').addEventListener('change', updateNotifFieldVisibility);
+
+document.getElementById('notif-add-btn').addEventListener('click', function(){
+  const days = Number(document.getElementById('notif-days').value) || 0;
+  const hours = Number(document.getElementById('notif-hours').value) || 0;
+  if(days === 0 && hours === 0){ return; }
+  pendingNotifications.push({ days_before: days, hours_before: hours });
+  document.getElementById('notif-days').value = '';
+  document.getElementById('notif-hours').value = '';
+  renderNotifChips();
+});
+
+document.getElementById('notif-add-default-btn').addEventListener('click', function(){
+  if(!settings) return;
+  pendingNotifications.push({ days_before: settings.notify_days_before || 0, hours_before: 0 });
+  if(settings.notify_hours_before){ pendingNotifications.push({ days_before: 0, hours_before: settings.notify_hours_before }); }
+  renderNotifChips();
+});
 
 function openAddForm(prefillTime){
   document.getElementById('f-date').value = localDateStr(currentDate);
   if(prefillTime){ document.getElementById('f-start').value = prefillTime; }
+  pendingNotifications = [];
+  renderNotifChips();
+  updateNotifFieldVisibility();
   addOverlay.style.display = 'flex';
   document.body.style.overflow = 'hidden'; // 背景のスクロールを止める
 }
@@ -633,6 +719,7 @@ function openEditForm(e){
   document.querySelector('.type-btn[data-type="event"]').classList.add('selected');
   document.querySelector('.type-btn[data-type="todo"]').style.display = 'none'; // Google予定のみ編集対象
   document.getElementById('time-fields').style.display = 'block';
+  document.getElementById('notif-field').style.display = 'none';
   document.getElementById('f-category').querySelector('option[value="danger"]').disabled = false;
   document.getElementById('f-title').value = e.title;
   document.getElementById('f-date').value = e.date;
@@ -695,6 +782,7 @@ document.querySelectorAll('.type-btn').forEach(function(btn){
     const deadlineOpt = catSelect.querySelector('option[value="danger"]');
     if(deadlineOpt){ deadlineOpt.disabled = isTodo; }
     if(isTodo && catSelect.value === 'danger'){ catSelect.value = 'accent'; }
+    updateNotifFieldVisibility();
   });
 });
 
@@ -709,7 +797,10 @@ document.getElementById('f-submit').addEventListener('click', async function(){
     const category = (categoryVal === 'accent') ? 'study' : 'work';
     try{
       const sortOrder = date ? 0 : (cachedUndated.reduce(function(m,t){ return Math.max(m, t.sort_order); }, 0) + 1);
-      await insertTodo({ title: title, category: category, due_date: date || null, sort_order: sortOrder });
+      const newTodo = await insertTodo({ title: title, category: category, due_date: date || null, sort_order: sortOrder });
+      if(date && pendingNotifications.length){
+        await insertTodoNotifications(newTodo.id, pendingNotifications);
+      }
       closeAddForm();
       document.getElementById('f-title').value = '';
       loadTodos();
@@ -1222,6 +1313,16 @@ async function deleteTodo(id){
   if(!res.ok){ throw new Error('削除に失敗しました（' + res.status + '）'); }
 }
 
+async function insertTodoNotifications(todoId, notifications){
+  const rows = notifications.map(function(n){ return { todo_id: todoId, days_before: n.days_before, hours_before: n.hours_before }; });
+  const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/todo_notifications', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rows)
+  });
+  if(!res.ok){ throw new Error('通知タイミングの保存に失敗しました（' + res.status + '）'); }
+}
+
 async function moveTodo(t, dir){
   const idx = cachedUndated.findIndex(function(x){ return x.id === t.id; });
   const swapIdx = idx + dir;
@@ -1339,6 +1440,127 @@ document.getElementById('deadline-toggle-completed').addEventListener('click', f
   showCompleted = !showCompleted;
   this.textContent = showCompleted ? '完了を隠す' : '完了を表示';
   renderDeadline();
+});
+
+/* ==============================
+   共有メンバー（allowed_emails、招待はinvite-member Edge Function経由）
+   ============================== */
+async function loadMembers(){
+  try{
+    const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/allowed_emails?select=email&order=added_at.asc');
+    if(!res.ok){ throw new Error('メンバー一覧の読み込みに失敗しました（' + res.status + '）'); }
+    const rows = await res.json();
+    renderMembers(rows);
+  } catch(err){
+    document.getElementById('member-status').textContent = err.message;
+  }
+}
+
+function renderMembers(rows){
+  const list = document.getElementById('member-list');
+  list.innerHTML = '';
+  rows.forEach(function(row){
+    const item = document.createElement('div');
+    item.className = 'deadline-row';
+    const title = document.createElement('span');
+    title.className = 'dr-title'; title.textContent = row.email;
+    item.appendChild(title);
+    const del = document.createElement('button');
+    del.textContent = '削除'; del.className = 'dr-del';
+    del.addEventListener('click', async function(){
+      if(!confirm(row.email + ' を削除しますか？（自分自身を削除すると、次回から自分もログインできなくなります）')){ return; }
+      try{
+        const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/allowed_emails?email=eq.' + encodeURIComponent(row.email), { method: 'DELETE' });
+        if(!res.ok){ throw new Error('削除に失敗しました（' + res.status + '）'); }
+        loadMembers();
+      } catch(err){
+        document.getElementById('member-status').textContent = err.message;
+      }
+    });
+    item.appendChild(del);
+    list.appendChild(item);
+  });
+}
+
+document.getElementById('member-invite-btn').addEventListener('click', async function(){
+  const email = document.getElementById('member-email').value.trim();
+  const statusEl = document.getElementById('member-status');
+  if(!email){ statusEl.textContent = 'メールアドレスを入力してください'; return; }
+  statusEl.textContent = '招待中…';
+  try{
+    const session = getSession();
+    const res = await fetch(SUPABASE_URL + '/functions/v1/invite-member', {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + (session ? session.access_token : ''), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    });
+    const data = await res.json().catch(function(){ return {}; });
+    if(!res.ok){ throw new Error(data.error || ('招待に失敗しました（' + res.status + '）')); }
+    document.getElementById('member-email').value = '';
+    statusEl.textContent = email + ' を招待しました。相手はログイン画面からメールアドレスを入力すればログインリンクを受け取れます。';
+    loadMembers();
+  } catch(err){
+    statusEl.textContent = err.message;
+  }
+});
+
+/* ==============================
+   Push通知の購読（Service Worker登録 → 通知許可 → push_subscriptionsへ保存）
+   ============================== */
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for(let i = 0; i < rawData.length; i++){ outputArray[i] = rawData.charCodeAt(i); }
+  return outputArray;
+}
+
+async function updatePushStatus(){
+  const statusEl = document.getElementById('push-status');
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    statusEl.textContent = 'この端末・ブラウザはPush通知に対応していません';
+    document.getElementById('push-subscribe-btn').disabled = true;
+    return;
+  }
+  try{
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    statusEl.textContent = sub ? 'この端末は通知を受け取れます' : 'この端末では通知を受け取っていません';
+  } catch(e){
+    statusEl.textContent = 'この端末では通知を受け取っていません';
+  }
+}
+
+document.getElementById('push-subscribe-btn').addEventListener('click', async function(){
+  const statusEl = document.getElementById('push-status');
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    statusEl.textContent = 'この端末・ブラウザはPush通知に対応していません';
+    return;
+  }
+  try{
+    statusEl.textContent = '設定中…';
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const permission = await Notification.requestPermission();
+    if(permission !== 'granted'){
+      statusEl.textContent = '通知が許可されませんでした';
+      return;
+    }
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+    const json = sub.toJSON();
+    const res = await supabaseFetch(SUPABASE_URL + '/rest/v1/push_subscriptions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+      body: JSON.stringify({ endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth })
+    });
+    if(!res.ok){ throw new Error('登録に失敗しました（' + res.status + '）'); }
+    statusEl.textContent = 'この端末は通知を受け取れます';
+  } catch(err){
+    statusEl.textContent = err.message;
+  }
 });
 
 /* ==============================

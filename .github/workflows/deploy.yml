@@ -14,7 +14,7 @@ jobs:
       - name: Prepare deploy folder
         run: |
           mkdir -p public
-          cp index.html public/
+          cp index.html sw.js public/
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
