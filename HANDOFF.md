@@ -15,13 +15,13 @@
 
 ## Google Cloud Console 設定状況（設定済み）
 
-- プロジェクト名: `my-calendar-app`
+- プロジェクト名: `my-calendar-app`（2026-07-16に旧プロジェクトが消失していたため再作成）
 - Google Calendar API: 有効化済み
 - OAuth同意画面: 外部 / テストモード、テストユーザーとしてまる本人のGoogleアカウントを登録済み
 - スコープ: `https://www.googleapis.com/auth/calendar`（フルアクセス）
-- OAuthクライアントID: `356778122638-4u3spagvtmjbjfnm3ck70uqise7tmapd.apps.googleusercontent.com`
+- OAuthクライアントID: `861651073315-7mu99hkdro1cm4ni7n2fglqfrk4uanbn.apps.googleusercontent.com`（2026-07-16に再発行）
 - クライアントシークレットは未取得・不要（ブラウザ完結型アプリのため使わない方針）
-- 承認済みのJavaScript生成元に`https://calendar-app-cav.pages.dev`を登録済み
+- 承認済みのJavaScript生成元に`https://calendar-app-cav.pages.dev`と`http://localhost:8765`を登録済み
 
 ## Supabase設定状況（設定済み）
 
