@@ -3,3 +3,4 @@
 server.log
 .claude/
 dist_deploy/
+.env*
